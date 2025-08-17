@@ -1,9 +1,5 @@
-
-
-```javascript
 // Telegram бот для расчёта оплат мастеров поддержки
 const TelegramBot = require('node-telegram-bot-api');
-const fs = require('fs').promises;
 
 // Получаем токен из переменных окружения
 const token = process.env.BOT_TOKEN || '7581144814:AAGPfo6zeT6vJDW5RlH5B5BpAr8-fhyeOLU';
@@ -13,9 +9,6 @@ console.log('🤖 Токен загружен:', token ? 'Да' : 'Нет');
 console.log('🌐 Запуск бота...');
 
 const bot = new TelegramBot(token, { polling: true });
-
-// Файл для хранения данных о платежах
-const PAYMENTS_FILE = 'payments_data.json';
 
 // Тарифы комиссий
 const packageRates = {
@@ -27,125 +20,6 @@ const packageRates = {
 
 // Хранилище данных пользователей
 const userSessions = {};
-
-// Функции для работы с данными платежей
-async function loadPaymentsData() {
-    try {
-        const data = await fs.readFile(PAYMENTS_FILE, 'utf8');
-        return JSON.parse(data);
-    } catch (error) {
-        console.log('📂 Создаём новый файл данных платежей');
-        return [];
-    }
-}
-
-async function savePaymentsData(data) {
-    try {
-        await fs.writeFile(PAYMENTS_FILE, JSON.stringify(data, null, 2));
-        console.log('💾 Данные платежей сохранены');
-    } catch (error) {
-        console.error('❌ Ошибка сохранения данных:', error);
-    }
-}
-
-async function addPaymentRecord(paymentData) {
-    try {
-        const payments = await loadPaymentsData();
-        
-        const record = {
-            id: Date.now() + Math.random(),
-            clientName: paymentData.clientName,
-            masterName: paymentData.masterName,
-            packageType: paymentData.packageType,
-            practicesCount: paymentData.practicesCount,
-            totalAmount: paymentData.totalAmount,
-            paidAmount: paymentData.paidAmount,
-            remainingAmount: paymentData.totalAmount - paymentData.paidAmount,
-            remainderPayments: paymentData.remainderPayments || [],
-            createdAt: new Date().toISOString(),
-            chatId: paymentData.chatId,
-            messageThreadId: paymentData.messageThreadId
-        };
-        
-        payments.push(record);
-        await savePaymentsData(payments);
-        console.log(`💰 Добавлена запись о платеже: ${paymentData.clientName}`);
-        return record;
-    } catch (error) {
-        console.error('❌ Ошибка добавления записи:', error);
-        return null;
-    }
-}
-
-function parseDate(dateStr) {
-    const formats = [
-        /(\d{1,2})\.(\d{1,2})\.(\d{2,4})/,
-        /(\d{1,2})\s+(\w+)/,
-    ];
-    
-    const months = {
-        'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4, 'мая': 5, 'июня': 6,
-        'июля': 7, 'августа': 8, 'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12
-    };
-    
-    const match1 = dateStr.match(formats[0]);
-    if (match1) {
-        let [, day, month, year] = match1;
-        year = year.length === 2 ? `20${year}` : year;
-        return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-    }
-    
-    const match2 = dateStr.match(formats[1]);
-    if (match2) {
-        const [, day, monthName] = match2;
-        const month = months[monthName.toLowerCase()];
-        if (month) {
-            const currentYear = new Date().getFullYear();
-            return new Date(currentYear, month - 1, parseInt(day));
-        }
-    }
-    
-    const fallback = new Date();
-    fallback.setMonth(fallback.getMonth() + 1);
-    return fallback;
-}
-
-async function getUpcomingPayments() {
-    try {
-        const payments = await loadPaymentsData();
-        const upcoming = [];
-        const now = new Date();
-        
-        payments.forEach(payment => {
-            if (payment.remainderPayments && payment.remainderPayments.length > 0) {
-                payment.remainderPayments.forEach(remainder => {
-                    const dueDate = parseDate(remainder.date);
-                    const daysUntil = Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24));
-                    
-                    if (daysUntil >= 0) {
-                        upcoming.push({
-                            clientName: payment.clientName,
-                            masterName: payment.masterName,
-                            packageType: payment.packageType,
-                            amount: remainder.amount,
-                            dueDate: dueDate,
-                            dueDateStr: remainder.date,
-                            daysUntil: daysUntil,
-                            chatId: payment.chatId,
-                            messageThreadId: payment.messageThreadId
-                        });
-                    }
-                });
-            }
-        });
-        
-        upcoming.sort((a, b) => a.dueDate - b.dueDate);
-        return upcoming;
-    } catch (error) {
-        console.error('❌ Ошибка получения платежей:', error);
-        return [];
-    }
-}
 
 // Функция удаления сообщения
 async function deleteMessage(chatId, messageId) {
@@ -200,7 +74,7 @@ ${clientName}.
     if (remainder > 0) {
         if (remainderPayments && remainderPayments.length > 0) {
             message += `\nОстаток ${formatAmount(remainder)}:`;
-            remainderPayments.forEach((payment, index) => {
+            remainderPayments.forEach((payment) => {
                 message += `\n• ${formatAmount(payment.amount)} до ${payment.date}`;
             });
         } else {
@@ -230,13 +104,6 @@ async function finalizeSale(sessionKey, session) {
     for (const messageId of session.messagesToDelete) {
         await deleteMessage(chatId, messageId);
     }
-    
-    const paymentData = {
-        ...session.data,
-        chatId: chatId,
-        messageThreadId: session.messageThreadId
-    };
-    await addPaymentRecord(paymentData);
     
     const saleMessage = generateSaleMessage(session.data);
     console.log(`📄 Финальное сообщение готово`);
@@ -298,126 +165,34 @@ bot.onText(/\/sale/, async (msg) => {
     console.log(`✅ Сессия создана с ключом ${sessionKey}`);
 });
 
-// Команда /pay
-bot.onText(/\/pay/, async (msg) => {
-    const chatId = msg.chat.id;
-    const messageThreadId = msg.message_thread_id;
-    
-    console.log(`📊 Запрос списка платежей от ${msg.from.first_name}`);
-    
-    await deleteMessage(chatId, msg.message_id);
-    
-    try {
-        const upcomingPayments = await getUpcomingPayments();
-        
-        if (upcomingPayments.length === 0) {
-            const noPaymentsMessage = await bot.sendMessage(chatId, '📋 Нет предстоящих платежей', {
-                message_thread_id: messageThreadId
-            });
-            
-            setTimeout(async () => {
-                await deleteMessage(chatId, noPaymentsMessage.message_id);
-            }, 5000);
-            return;
-        }
-        
-        let message = '📅 *Предстоящие платежи:*\n\n';
-        
-        upcomingPayments.forEach((payment) => {
-            const urgencyIcon = payment.daysUntil <= 3 ? '🔴' : payment.daysUntil <= 7 ? '🟡' : '🟢';
-            const daysText = payment.daysUntil === 0 ? 'сегодня' : 
-                            payment.daysUntil === 1 ? 'завтра' : 
-                            `через ${payment.daysUntil} дн.`;
-            
-            message += `${urgencyIcon} *${payment.clientName}*\n`;
-            message += `   Мастер: ${payment.masterName}\n`;
-            message += `   Пакет: ${payment.packageType}\n`;
-            message += `   Сумма: ${formatAmount(payment.amount)}\n`;
-            message += `   До: ${payment.dueDateStr} (${daysText})\n\n`;
-        });
-        
-        message += `\n🔴 Срочно (≤3 дней) | 🟡 Скоро (≤7 дней) | 🟢 Позже`;
-        
-        const paymentsMessage = await bot.sendMessage(chatId, message, {
-            parse_mode: 'Markdown',
-            message_thread_id: messageThreadId
-        });
-        
-        setTimeout(async () => {
-            await deleteMessage(chatId, paymentsMessage.message_id);
-        }, 30000);
-        
-    } catch (error) {
-        console.error('❌ Ошибка при получении платежей:', error);
-        const errorMessage = await bot.sendMessage(chatId, '❌ Ошибка при загрузке данных о платежах', {
-            message_thread_id: messageThreadId
-        });
-        
-        setTimeout(async () => {
-            await deleteMessage(chatId, errorMessage.message_id);
-        }, 5000);
-    }
-});
-
-// Команда /help
-bot.onText(/\/help/, async (msg) => {
+// Команда /start
+bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const messageThreadId = msg.message_thread_id;
     
     await deleteMessage(chatId, msg.message_id);
     
-    const helpText = `🤖 *Бот расчёта оплат*
+    const welcomeText = `🎉 *Добро пожаловать в бот расчёта оплат!*
 
-📝 *Команды:*
-/sale - начать расчёт новой продажи
-/pay - посмотреть предстоящие платежи
-/cancel - отменить текущий расчёт
-/help - показать эту справку
+🚀 *Команды:*
+/sale - начать новый расчёт
 
 💰 *Тарифы комиссий:*
-• Стартовый набор - 7%
-• Расширение - 8%
-• Масштаб - 10%
-• Абсолют - 12%
+- Стартовый набор - 7%
+- Расширение - 8%
+- Масштаб - 10%
+- Абсолют - 12%
 
 Просто введите /sale и следуйте инструкциям!`;
     
-    const helpMessage = await bot.sendMessage(chatId, helpText, { 
+    const welcomeMessage = await bot.sendMessage(chatId, welcomeText, { 
         parse_mode: 'Markdown',
         message_thread_id: messageThreadId
     });
     
     setTimeout(async () => {
-        await deleteMessage(chatId, helpMessage.message_id);
-    }, 15000);
-});
-
-// Команда /cancel
-bot.onText(/\/cancel/, async (msg) => {
-    const chatId = msg.chat.id;
-    const messageThreadId = msg.message_thread_id;
-    const sessionKey = `${chatId}_${messageThreadId || 'main'}`;
-    
-    await deleteMessage(chatId, msg.message_id);
-    
-    if (userSessions[sessionKey]) {
-        if (userSessions[sessionKey].messagesToDelete) {
-            for (const messageId of userSessions[sessionKey].messagesToDelete) {
-                await deleteMessage(chatId, messageId);
-            }
-        }
-        
-        delete userSessions[sessionKey];
-        console.log(`❌ Сессия ${sessionKey} отменена`);
-        
-        const cancelMessage = await bot.sendMessage(chatId, '❌ Расчёт отменён.\n\nДля нового расчёта введите /sale', {
-            message_thread_id: messageThreadId
-        });
-        
-        setTimeout(async () => {
-            await deleteMessage(chatId, cancelMessage.message_id);
-        }, 3000);
-    }
+        await deleteMessage(chatId, welcomeMessage.message_id);
+    }, 10000);
 });
 
 // Обработка callback данных
@@ -451,28 +226,6 @@ bot.on('callback_query', async (callbackQuery) => {
         );
         
         bot.answerCallbackQuery(callbackQuery.id, { text: `Выбран ${data}` });
-        return;
-    }
-    
-    if (session && session.step === 'remainderPayments') {
-        if (data === 'add_tranches') {
-            session.step = 'tranches_count';
-            await bot.editMessageText(
-                `💰 Остаток: ${formatAmount(session.data.remainingAmount)}\n\nСколько будет траншей? Введите число:`,
-                {
-                    chat_id: chatId,
-                    message_id: message.message_id,
-                    message_thread_id: session.messageThreadId
-                }
-            );
-            bot.answerCallbackQuery(callbackQuery.id, { text: 'Указываем количество траншей' });
-        } else if (data === 'skip_tranches') {
-            bot.answerCallbackQuery(callbackQuery.id, { text: 'Указываем общий остаток' });
-            await finalizeSale(sessionKey, session);
-        } else if (data === 'finish_tranches') {
-            bot.answerCallbackQuery(callbackQuery.id, { text: 'Завершаем' });
-            await finalizeSale(sessionKey, session);
-        }
         return;
     }
     
@@ -618,6 +371,49 @@ bot.on('message', async (msg) => {
             
             const remainder = session.data.totalAmount - paidAmount;
             if (remainder > 0) {
+                session.data.remainderPayments = [{ amount: remainder, date: 'не указана' }];
+            }
+            
+            console.log(`✅ Генерируем финальное сообщение`);
+            await finalizeSale(sessionKey, session);
+            break;
+    }
+});
+
+console.log('🤖 Бот запущен! Ожидаю команды...');
+
+// Обработка ошибок
+bot.on('error', (error) => {
+    console.log('❌ Ошибка бота:', error.message);
+});
+
+bot.on('polling_error', (error) => {
+    console.log('❌ Ошибка polling:', error.message);
+});
+
+case 'paidAmount':
+            const paidAmount = parseFloat(text.replace(/\s/g, ''));
+            if (isNaN(paidAmount) || paidAmount <= 0) {
+                const errorMessage = await bot.sendMessage(chatId, '❌ Пожалуйста, введите корректную сумму оплаты:', {
+                    message_thread_id: session.messageThreadId
+                });
+                session.messagesToDelete.push(errorMessage.message_id);
+                return;
+            }
+            
+            if (paidAmount > session.data.totalAmount) {
+                const errorMessage = await bot.sendMessage(chatId, '⚠️ Оплаченная сумма не может быть больше полной стоимости. Введите корректную сумму:', {
+                    message_thread_id: session.messageThreadId
+                });
+                session.messagesToDelete.push(errorMessage.message_id);
+                return;
+            }
+            
+            session.data.paidAmount = paidAmount;
+            console.log(`✅ Оплачено: ${paidAmount}`);
+            
+            const remainder = session.data.totalAmount - paidAmount;
+            if (remainder > 0) {
                 session.step = 'remainderPayments';
                 session.data.remainderPayments = [];
                 session.data.remainingAmount = remainder;
@@ -688,4 +484,294 @@ bot.on('message', async (msg) => {
             session.data.currentTranche = { amount: trancheAmount };
             session.step = 'tranche_date';
             
-            const dateMessage = await bot.sendMessage(chatId, `📅 Введите дату ${session.
+            const dateMessage = await bot.sendMessage(chatId, `📅 Введите дату ${session.data.currentTrancheIndex}-го транша (например: 15.09.25 или 15 сентября):`, {
+                message_thread_id: session.messageThreadId
+            });
+            session.messagesToDelete.push(dateMessage.message_id);
+            break;
+            
+        case 'tranche_date':
+            const trancheDate = text.trim();
+            session.data.currentTranche.date = trancheDate;
+            session.data.remainderPayments.push(session.data.currentTranche);
+            session.data.remainingAmount -= session.data.currentTranche.amount;
+            session.data.currentTrancheIndex++;
+            
+            if (session.data.currentTrancheIndex <= session.data.totalTranches && session.data.remainingAmount > 0) {
+                session.step = 'tranche_amount';
+                const nextTrancheMessage = await bot.sendMessage(
+                    chatId,
+                    `✅ Транш ${session.data.currentTrancheIndex - 1} добавлен: ${formatAmount(session.data.currentTranche.amount)} до ${trancheDate}\n\n💰 Транш ${session.data.currentTrancheIndex} из ${session.data.totalTranches}\nОстаток: ${formatAmount(session.data.remainingAmount)}\n\nВведите сумму ${session.data.currentTrancheIndex}-го транша:`,
+                    {
+                        message_thread_id: session.messageThreadId
+                    }
+                );
+                session.messagesToDelete.push(nextTrancheMessage.message_id);
+            } else {
+                if (session.data.remainingAmount > 0) {
+                    session.data.remainderPayments.push({
+                        amount: session.data.remainingAmount,
+                        date: 'не указана'
+                    });
+                }
+                await finalizeSale(sessionKey, session);
+            }
+            break;
+            
+        default:
+            const helpMessage = await bot.sendMessage(chatId, 'Для начала расчёта введите /sale', {
+                message_thread_id: session?.messageThreadId
+            });
+            setTimeout(async () => {
+                await deleteMessage(chatId, helpMessage.message_id);
+            }, 3000);
+    }
+});
+
+// Команда /pay - просмотр предстоящих платежей
+bot.onText(/\/pay/, async (msg) => {
+    const chatId = msg.chat.id;
+    const messageThreadId = msg.message_thread_id;
+    
+    console.log(`📊 Запрос списка платежей от пользователя ${msg.from.first_name}`);
+    
+    await deleteMessage(chatId, msg.message_id);
+    
+    try {
+        const upcomingPayments = await getUpcomingPayments();
+        
+        if (upcomingPayments.length === 0) {
+            const noPaymentsMessage = await bot.sendMessage(chatId, '📋 Нет предстоящих платежей', {
+                message_thread_id: messageThreadId
+            });
+            
+            setTimeout(async () => {
+                await deleteMessage(chatId, noPaymentsMessage.message_id);
+            }, 5000);
+            return;
+        }
+        
+        let message = '📅 *Предстоящие платежи:*\n\n';
+        
+        upcomingPayments.forEach((payment) => {
+            const urgencyIcon = payment.daysUntil <= 3 ? '🔴' : payment.daysUntil <= 7 ? '🟡' : '🟢';
+            const daysText = payment.daysUntil === 0 ? 'сегодня' : 
+                            payment.daysUntil === 1 ? 'завтра' : 
+                            `через ${payment.daysUntil} дн.`;
+            
+            message += `${urgencyIcon} *${payment.clientName}*\n`;
+            message += `   Мастер: ${payment.masterName}\n`;
+            message += `   Пакет: ${payment.packageType}\n`;
+            message += `   Сумма: ${formatAmount(payment.amount)}\n`;
+            message += `   До: ${payment.dueDateStr} (${daysText})\n\n`;
+        });
+        
+        message += `\n🔴 Срочно (≤3 дней) | 🟡 Скоро (≤7 дней) | 🟢 Позже`;
+        
+        const paymentsMessage = await bot.sendMessage(chatId, message, {
+            parse_mode: 'Markdown',
+            message_thread_id: messageThreadId
+        });
+        
+        setTimeout(async () => {
+            await deleteMessage(chatId, paymentsMessage.message_id);
+        }, 30000);
+        
+    } catch (error) {
+        console.error('❌ Ошибка при получении платежей:', error);
+        const errorMessage = await bot.sendMessage(chatId, '❌ Ошибка при загрузке данных о платежах', {
+            message_thread_id: messageThreadId
+        });
+        
+        setTimeout(async () => {
+            await deleteMessage(chatId, errorMessage.message_id);
+        }, 5000);
+    }
+});
+
+// Команда /help - справка
+bot.onText(/\/help/, async (msg) => {
+    const chatId = msg.chat.id;
+    const messageThreadId = msg.message_thread_id;
+    
+    await deleteMessage(chatId, msg.message_id);
+    
+    const helpText = `🤖 *Бот расчёта оплат*
+
+📝 *Команды:*
+/sale - начать расчёт новой продажи
+/pay - посмотреть предстоящие платежи
+/cancel - отменить текущий расчёт
+/help - показать эту справку
+
+💰 *Тарифы комиссий:*
+• Стартовый набор - 7%
+• Расширение - 8%
+• Масштаб - 10%
+• Абсолют - 12%
+
+📅 *Уведомления:*
+• За 3 дня до платежа
+• В день платежа
+• Автоматически в чат
+
+Просто введите /sale и следуйте инструкциям!`;
+    
+    const helpMessage = await bot.sendMessage(chatId, helpText, { 
+        parse_mode: 'Markdown',
+        message_thread_id: messageThreadId
+    });
+    
+    setTimeout(async () => {
+        await deleteMessage(chatId, helpMessage.message_id);
+    }, 15000);
+});
+
+// Команда /cancel - отмена текущего расчёта
+bot.onText(/\/cancel/, async (msg) => {
+    const chatId = msg.chat.id;
+    const messageThreadId = msg.message_thread_id;
+    const sessionKey = `${chatId}_${messageThreadId || 'main'}`;
+    
+    await deleteMessage(chatId, msg.message_id);
+    
+    if (userSessions[sessionKey]) {
+        if (userSessions[sessionKey].messagesToDelete) {
+            for (const messageId of userSessions[sessionKey].messagesToDelete) {
+                await deleteMessage(chatId, messageId);
+            }
+        }
+        
+        delete userSessions[sessionKey];
+        console.log(`❌ Сессия ${sessionKey} отменена`);
+        
+        const cancelMessage = await bot.sendMessage(chatId, '❌ Расчёт отменён.\n\nДля нового расчёта введите /sale', {
+            message_thread_id: messageThreadId
+        });
+        
+        setTimeout(async () => {
+            await deleteMessage(chatId, cancelMessage.message_id);
+        }, 3000);
+    } else {
+        const noSessionMessage = await bot.sendMessage(chatId, 'Нет активного расчёта для отмены.\n\nДля начала расчёта введите /sale', {
+            message_thread_id: messageThreadId
+        });
+        
+        setTimeout(async () => {
+            await deleteMessage(chatId, noSessionMessage.message_id);
+        }, 3000);
+    }
+});
+
+// Дополнительные обработчики callback для траншей
+bot.on('callback_query', async (callbackQuery) => {
+    const message = callbackQuery.message;
+    const chatId = message.chat.id;
+    const messageThreadId = message.message_thread_id;
+    const data = callbackQuery.data;
+    const sessionKey = `${chatId}_${messageThreadId || 'main'}`;
+    
+    if (!userSessions[sessionKey] && data !== 'new_calculation') {
+        bot.answerCallbackQuery(callbackQuery.id, { text: 'Сессия истекла. Начните заново с /sale' });
+        return;
+    }
+    
+    const session = userSessions[sessionKey];
+    
+    // Обработка управления траншами
+    if (session && session.step === 'remainderPayments') {
+        if (data === 'add_tranches') {
+            session.step = 'tranches_count';
+            await bot.editMessageText(
+                `💰 Остаток: ${formatAmount(session.data.remainingAmount)}\n\nСколько будет траншей? Введите число:`,
+                {
+                    chat_id: chatId,
+                    message_id: message.message_id,
+                    message_thread_id: session.messageThreadId
+                }
+            );
+            bot.answerCallbackQuery(callbackQuery.id, { text: 'Указываем количество траншей' });
+        } else if (data === 'skip_tranches') {
+            bot.answerCallbackQuery(callbackQuery.id, { text: 'Указываем общий остаток' });
+            await finalizeSale(sessionKey, session);
+        } else if (data === 'finish_tranches') {
+            bot.answerCallbackQuery(callbackQuery.id, { text: 'Завершаем' });
+            await finalizeSale(sessionKey, session);
+        }
+        return;
+    }
+});
+
+// Система уведомлений о платежах
+async function checkAndSendNotifications() {
+    try {
+        const upcomingPayments = await getUpcomingPayments();
+        
+        for (const payment of upcomingPayments) {
+            const daysUntil = payment.daysUntil;
+            
+            // Уведомления за 3 дня и в день платежа
+            if (daysUntil === 3 || daysUntil === 0) {
+                const notificationText = daysUntil === 3 
+                    ? `⏰ *Напоминание о платеже через 3 дня*
+
+🙋‍♀️ Клиент: *${payment.clientName}*
+👤 Мастер: ${payment.masterName}
+📦 Пакет: ${payment.packageType}
+💰 Сумма: ${formatAmount(payment.amount)}
+📅 Дата: ${payment.dueDateStr}
+
+💡 Самое время напомнить клиенту об оплате!`
+                    : `🔔 *Платёж сегодня!*
+
+🙋‍♀️ Клиент: *${payment.clientName}*
+👤 Мастер: ${payment.masterName}
+📦 Пакет: ${payment.packageType}
+💰 Сумма: ${formatAmount(payment.amount)}
+📅 Дата: ${payment.dueDateStr}
+
+🚨 Срочно свяжитесь с клиентом!`;
+                
+                await bot.sendMessage(payment.chatId, notificationText, {
+                    parse_mode: 'Markdown',
+                    message_thread_id: payment.messageThreadId
+                });
+                
+                console.log(`🔔 Отправлено уведомление о платеже: ${payment.clientName} (${daysUntil === 0 ? 'сегодня' : 'через 3 дня'})`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Ошибка при отправке уведомлений:', error);
+    }
+}
+
+console.log('🤖 Бот запущен! Ожидаю команды...');
+console.log('🔔 Система уведомлений активирована');
+
+// Запускаем проверку уведомлений каждые 12 часов
+setInterval(checkAndSendNotifications, 12 * 60 * 60 * 1000);
+
+// Проверяем уведомления при запуске бота
+setTimeout(checkAndSendNotifications, 5000);
+
+// Обработка ошибок
+bot.on('error', (error) => {
+    console.log('❌ Ошибка бота:', error.message);
+});
+
+bot.on('polling_error', (error) => {
+    console.log('❌ Ошибка polling:', error.message);
+});
+
+// Graceful shutdown для облачного деплоя
+process.on('SIGINT', () => {
+    console.log('🛑 Получен сигнал SIGINT, останавливаем бота...');
+    bot.stopPolling();
+    process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+    console.log('🛑 Получен сигнал SIGTERM, останавливаем бота...');
+    bot.stopPolling();
+    process.exit(0);
+});
